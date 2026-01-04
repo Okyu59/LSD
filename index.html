@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>LSD Loop Runner: Night Edition</title>
     
     <!-- Tailwind CSS -->
@@ -22,6 +22,10 @@
                     fontFamily: {
                         sans: ['Inter', 'system-ui', 'sans-serif'],
                         mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    padding: {
+                        'safe-bottom': 'env(safe-area-inset-bottom)',
+                        'safe-pt': 'env(safe-area-inset-top)',
                     },
                     animation: {
                         'slide-up': 'slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards',
@@ -61,6 +65,8 @@
             font-family: 'Inter', sans-serif; 
             background-color: #000;
             color: #fff;
+            height: 100dvh; /* Dynamic Viewport Height for Mobile */
+            overflow: hidden;
         }
         .font-mono { font-family: 'JetBrains Mono', monospace; }
         .hide-scrollbar::-webkit-scrollbar { display: none; }
@@ -80,7 +86,7 @@
         .leaflet-container { width: 100%; height: 100%; background: #eee; }
     </style>
 </head>
-<body class="h-screen flex flex-col overflow-hidden selection:bg-brand selection:text-black">
+<body class="selection:bg-brand selection:text-black">
     <div id="root" class="h-full w-full flex flex-col"></div>
 
     <script type="text/babel">
@@ -495,21 +501,21 @@
                     {/* Input Bottom Sheet */}
                     {view === 'input' && (
                         <div 
-                            className={`absolute bottom-0 left-0 right-0 z-30 bg-gray-900 rounded-t-[2.5rem] border-t border-white/10 shadow-2xl shadow-black transition-all duration-300 flex flex-col h-auto max-h-[90dvh]`}
+                            className={`absolute bottom-0 left-0 right-0 z-30 bg-gray-900 rounded-t-[2.5rem] border-t border-white/10 shadow-2xl shadow-black transition-all duration-300 flex flex-col h-auto max-h-[85dvh]`}
                         >
                             {/* Handle Bar */}
                             <div 
-                                className="flex-none p-4 flex justify-center cursor-pointer"
+                                className="flex-none p-4 flex justify-center cursor-pointer shrink-0 touch-none"
                                 onClick={() => setIsSheetOpen(!isSheetOpen)}
                             >
                                 <div className="w-12 h-1 bg-white/30 rounded-full"></div>
                             </div>
                             
-                            {/* Content Container */}
-                            <div className="px-8 pb-4">
+                            {/* Scrollable Content Container */}
+                            <div className="flex-1 overflow-y-auto overscroll-contain px-8 pb-safe-bottom">
                                 
                                 {/* Location (Always Visible) */}
-                                <div className="mb-6">
+                                <div className="mb-6 shrink-0">
                                     <label className="text-xs font-bold text-gray-200 mb-2 uppercase tracking-wider flex items-center gap-2 drop-shadow-md">
                                         <Icon name="mapPin" className="text-brand" /> Start Point
                                     </label>
@@ -524,7 +530,7 @@
                                 </div>
 
                                 {/* Collapsible Section */}
-                                <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isSheetOpen ? 'max-h-[1000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                                <div className={`transition-all duration-300 ease-in-out ${isSheetOpen ? 'opacity-100' : 'h-0 opacity-0 overflow-hidden'}`}>
                                     {/* Options Tabs */}
                                     <div className="mb-8">
                                         <div className="flex bg-black/40 p-1 rounded-2xl mb-4">
@@ -617,7 +623,7 @@
                                     </div>
 
                                     {/* Footer CTA (Inside collapsible to hide when closed) */}
-                                    <div className="pt-2 pb-2">
+                                    <div className="pt-2 pb-8">
                                         <button onClick={findCourses} disabled={loading} className="w-full bg-brand text-black font-black text-lg h-16 rounded-2xl shadow-[0_0_20px_rgba(204,255,0,0.3)] hover:shadow-[0_0_30px_rgba(204,255,0,0.5)] active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:bg-gray-700 disabled:text-gray-500 disabled:shadow-none uppercase tracking-wide">
                                             {loading ? <Icon name="loader" /> : <>FIND ROUTE <Icon name="arrowRight" /></>}
                                         </button>
