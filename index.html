@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>LSD Loop Runner: Night Edition</title>
     
     <!-- Tailwind CSS -->
@@ -15,54 +15,57 @@
                         brand: {
                             DEFAULT: '#ccff00', // Neon Lime (Volt)
                             dark: '#aacc00',
-                            bg: '#0f172a', 
+                            bg: '#0f172a', // Slate 900
+                            card: '#1e293b', // Slate 800
                         }
                     },
                     fontFamily: {
-                        sans: ['Inter', 'sans-serif'],
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
                         mono: ['JetBrains Mono', 'monospace'],
                     },
-                    // Add safe area utilities
-                    padding: {
-                        'safe-bottom': 'env(safe-area-inset-bottom)',
+                    animation: {
+                        'slide-up': 'slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+                        'fade-in': 'fadeIn 0.2s ease-out forwards',
+                    },
+                    keyframes: {
+                        slideUp: {
+                            'from': { transform: 'translateY(100%)', opacity: '0' },
+                            'to': { transform: 'translateY(0)', opacity: '1' },
+                        },
+                        fadeIn: {
+                            'from': { opacity: '0', transform: 'scale(0.95)' },
+                            'to': { opacity: '1', transform: 'scale(1)' },
+                        }
                     }
                 }
             }
         }
     </script>
     
-    <!-- React & Libraries -->
+    <!-- React & ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Leaflet CSS & JS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
 
     <style>
-        /* Core Reset */
-        html, body { 
-            height: 100%; 
-            width: 100%; 
-            margin: 0; 
-            padding: 0;
-            overflow: hidden; /* Prevent body scroll */
+        body { 
+            font-family: 'Inter', sans-serif; 
             background-color: #000;
-            font-family: 'Inter', sans-serif;
-            color: white;
-            -webkit-tap-highlight-color: transparent;
+            color: #fff;
         }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-        /* Dynamic Viewport Height Fix */
-        #root {
-            height: 100dvh; /* dynamic viewport height */
-            width: 100%;
-            display: flex;
-            flex-direction: column;
-            position: relative;
-        }
-        
-        /* Neon Range Slider */
         input[type=range] { -webkit-appearance: none; width: 100%; background: transparent; }
         input[type=range]::-webkit-slider-thumb {
             -webkit-appearance: none; height: 28px; width: 28px; border-radius: 50%;
@@ -74,37 +77,52 @@
             width: 100%; height: 4px; cursor: pointer; background: #334155; border-radius: 2px;
         }
         
-        .leaflet-container { width: 100%; height: 100%; background: #111; }
-        .hide-scrollbar::-webkit-scrollbar { display: none; }
-        
-        @keyframes slideUp {
-            from { transform: translateY(100%); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
-        }
-        .animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        .leaflet-container { width: 100%; height: 100%; background: #eee; }
     </style>
 </head>
-<body>
-    <div id="root"></div>
+<body class="h-screen flex flex-col overflow-hidden selection:bg-brand selection:text-black">
+    <div id="root" class="h-full w-full flex flex-col"></div>
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
+
         const API_KEY = "cd160bc2-0beb-4394-b713-29b69b378e6e";
         
-        // --- Utilities & Icons (Same as before) ---
+        // --- Utilities ---
         const DIFFICULTY = {
             FLAT: { label: 'FLAT', color: 'text-brand border-brand bg-brand/10' },
             MODERATE: { label: 'MODERATE', color: 'text-orange-400 border-orange-400 bg-orange-400/10' },
             HILLY: { label: 'HILLY', color: 'text-red-500 border-red-500 bg-red-500/10' }
         };
-        const calculateDifficulty = (dist, asc) => {
-            if (!dist) return DIFFICULTY.FLAT;
-            const r = asc / dist;
-            return r < 8 ? DIFFICULTY.FLAT : r < 15 ? DIFFICULTY.MODERATE : DIFFICULTY.HILLY;
-        };
-        const getPaceString = (s) => `${Math.floor(s/60)}'${(s%60).toString().padStart(2,'0')}"`;
 
+        const calculateDifficulty = (distanceKm, ascentM) => {
+            if (!distanceKm) return DIFFICULTY.FLAT;
+            const ratio = ascentM / distanceKm;
+            if (ratio < 8) return DIFFICULTY.FLAT;
+            if (ratio < 15) return DIFFICULTY.MODERATE;
+            return DIFFICULTY.HILLY;
+        };
+
+        const formatTime = (seconds) => {
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            return h > 0 ? `${h}h ${m}m` : `${m}min`;
+        };
+
+        const generateCourseName = (instructions) => {
+            if (!instructions || instructions.length === 0) return "도심 러닝 코스";
+            const streetNames = instructions
+                .map(inst => inst.street_name)
+                .filter(name => name && name.trim() !== "" && !name.includes("way") && !name.includes("cycle"));
+            const uniqueStreets = [...new Set(streetNames)];
+            if (uniqueStreets.length === 0) return "자유 러닝 코스";
+            const picked = uniqueStreets.slice(0, 2);
+            return picked.join(" · ") + " 코스";
+        };
+
+        // --- Icons ---
         const Icons = {
+            activity: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>,
             mapPin: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>,
             crosshair: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>,
             route: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H19"/></svg>,
@@ -114,71 +132,122 @@
             download: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
             trendingUp: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>,
             arrowRight: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>,
-            loader: <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+            loader: <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>,
+            plus: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>,
+            search: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>,
+            compass: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon></svg>,
+            trash: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>,
+            close: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>,
+            chevronDown: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
         };
 
-        const Icon = ({ name, className }) => React.cloneElement(Icons[name], { className: className || '', width: 20, height: 20 });
+        const Icon = ({ name, className }) => {
+            const svg = Icons[name];
+            if (!svg) return null;
+            return React.cloneElement(svg, { className: className || '', width: 20, height: 20 });
+        };
 
-        // --- Components ---
-        const MapView = ({ route, startLocation }) => {
+        // --- Map Component ---
+        const MapView = ({ route, startLocation, waypoint, isSheetOpen }) => {
             const mapRef = useRef(null);
             const mapInstanceRef = useRef(null);
             const layerGroupRef = useRef(null);
 
             useEffect(() => {
                 if (!mapInstanceRef.current && mapRef.current) {
-                    const map = L.map(mapRef.current, { zoomControl: false, attributionControl: false }).setView([startLocation.lat, startLocation.lng], 13);
-                    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+                    const map = L.map(mapRef.current, {
+                        zoomControl: false,
+                        attributionControl: false,
+                        zoomAnimation: true
+                    }).setView([startLocation.lat, startLocation.lng], 13);
+
+                    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+                        attribution: '&copy; OpenStreetMap &copy; CARTO',
+                        maxZoom: 19
+                    }).addTo(map);
+
                     layerGroupRef.current = L.layerGroup().addTo(map);
                     mapInstanceRef.current = map;
                 }
                 return () => {
-                    if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null; }
-                }
+                    if (mapInstanceRef.current) {
+                        mapInstanceRef.current.remove();
+                        mapInstanceRef.current = null;
+                        layerGroupRef.current = null;
+                    }
+                };
             }, []);
 
             useEffect(() => {
                 if (mapInstanceRef.current && layerGroupRef.current) {
-                    const group = layerGroupRef.current;
-                    group.clearLayers();
+                    const map = mapInstanceRef.current;
+                    const layerGroup = layerGroupRef.current;
                     
-                    const pulseIcon = L.divIcon({
+                    layerGroup.clearLayers();
+
+                    const startIcon = L.divIcon({
                         className: 'custom-div-icon',
-                        html: `<div style="background-color: #ccff00; width: 16px; height: 16px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 15px #ccff00;"></div>`,
+                        html: `<div style="background-color: #2563eb; width: 16px; height: 16px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 15px #2563eb;"></div>`,
                         iconSize: [16, 16],
                         iconAnchor: [8, 8]
                     });
-                    L.marker([startLocation.lat, startLocation.lng], { icon: pulseIcon }).addTo(group);
+                    L.marker([startLocation.lat, startLocation.lng], { icon: startIcon }).addTo(layerGroup);
 
-                    if (route?.points?.coordinates) {
-                        const latlngs = route.points.coordinates.map(c => [c[1], c[0]]);
-                        L.polyline(latlngs, { color: '#ccff00', weight: 5, opacity: 0.9 }).addTo(group);
-                        mapInstanceRef.current.fitBounds(L.polyline(latlngs).getBounds(), { padding: [80, 80] });
+                    if (waypoint) {
+                         const waypointIcon = L.divIcon({
+                            className: 'custom-div-icon',
+                            html: `<div style="background-color: #ccff00; width: 16px; height: 16px; border-radius: 50%; border: 3px solid #1e293b; box-shadow: 0 0 15px #ccff00;"></div>`,
+                            iconSize: [16, 16],
+                            iconAnchor: [8, 8]
+                        });
+                        L.marker([waypoint.lat, waypoint.lng], { icon: waypointIcon }).addTo(layerGroup);
+                    }
+
+                    if (route && route.points && route.points.coordinates) {
+                        const latlngs = route.points.coordinates.map(coord => [coord[1], coord[0]]);
+                        const polyline = L.polyline(latlngs, {
+                            color: '#2563eb', weight: 6, opacity: 0.9, lineCap: 'round', lineJoin: 'round', className: 'drop-shadow-lg' 
+                        }).addTo(layerGroup);
+                        
+                        map.fitBounds(polyline.getBounds(), { paddingBottomRight: [0, isSheetOpen ? 300 : 50], padding: [50, 50] });
+                    } else if (waypoint) {
+                         const bounds = L.latLngBounds([
+                             [startLocation.lat, startLocation.lng],
+                             [waypoint.lat, waypoint.lng]
+                         ]);
+                         map.fitBounds(bounds, { paddingBottomRight: [0, isSheetOpen ? 300 : 50], padding: [50, 50] });
                     } else {
-                        mapInstanceRef.current.setView([startLocation.lat, startLocation.lng], 14);
+                        const centerPoint = map.project([startLocation.lat, startLocation.lng], 14);
+                        // Adjust offset based on sheet state to keep pin visible
+                        const offset = isSheetOpen ? window.innerHeight * 0.25 : 0; 
+                        const newCenterPoint = centerPoint.add([0, offset]);
+                        const newCenter = map.unproject(newCenterPoint, 14);
+                        map.setView(newCenter, 14, { animate: true });
                     }
                 }
-            }, [startLocation, route]);
+            }, [startLocation, route, waypoint, isSheetOpen]);
 
-            return <div ref={mapRef} className="w-full h-full bg-[#111]"></div>;
+            return <div ref={mapRef} className="w-full h-full bg-gray-100"></div>;
         };
 
         const ElevationProfile = ({ points }) => {
             if (!points || points.length === 0) return null;
             try {
-                const sample = Math.max(1, Math.floor(points.length / 40));
-                const data = points.filter((_, i) => i % sample === 0).map(p => p[2] || 0);
+                const sampleRate = Math.max(1, Math.floor(points.length / 40));
+                const data = points.filter((_, i) => i % sampleRate === 0).map(p => p[2] || 0);
                 if (data.length === 0) return null;
-                const min = Math.min(...data), max = Math.max(...data), range = (max - min) || 10;
+                const min = Math.min(...data);
+                const max = Math.max(...data);
+                const range = (max - min) || 10;
                 return (
-                    <div className="h-12 w-full flex items-end gap-[2px] mt-4 opacity-80">
-                        {data.map((h, i) => (
-                            <div key={i} className="flex-1 bg-brand rounded-t-[1px]" 
-                                 style={{ height: `${Math.max(10, ((h-min)/range)*100)}%`, opacity: 0.3 + (0.7*((h-min)/range)) }}></div>
+                    <div className="h-16 w-full flex items-end gap-[2px] mt-4 opacity-90">
+                        {data.map((ele, i) => (
+                            <div key={i} className="flex-1 bg-brand rounded-t-[1px]"
+                                style={{ height: `${Math.max(10, ((ele - min) / range) * 100)}%`, opacity: 0.3 + (0.7 * ((ele - min) / range)) }}></div>
                         ))}
                     </div>
                 );
-            } catch { return null; }
+            } catch (e) { return null; }
         };
 
         const App = () => {
@@ -188,126 +257,371 @@
             const [routes, setRoutes] = useState([]);
             const [selectedIdx, setSelectedIdx] = useState(0);
             const [loading, setLoading] = useState(false);
+            const [error, setError] = useState(null);
             const [view, setView] = useState('input');
+            const [directions, setDirections] = useState(['무작위']);
+            const [waypoint, setWaypoint] = useState(null);
+            const [searchQuery, setSearchQuery] = useState('');
+            const [searchResults, setSearchResults] = useState([]);
+            const [isSearching, setIsSearching] = useState(false);
+            
+            // UI States
+            const [isSheetOpen, setIsSheetOpen] = useState(true);
+            const [optionTab, setOptionTab] = useState(null); // Changed default to null
+
+            const cardRefs = useRef([]);
+
+            useEffect(() => {
+                if (view === 'result' && routes.length > 0 && cardRefs.current[selectedIdx]) {
+                    cardRefs.current[selectedIdx].scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                }
+            }, [selectedIdx, view, routes]);
 
             const handleGeoLocation = () => {
                 setLoading(true);
-                if (!navigator.geolocation) { setLoading(false); return; }
+                if (!navigator.geolocation) { setError("위치 서비스 미지원"); setLoading(false); return; }
                 navigator.geolocation.getCurrentPosition(
-                    (p) => { setLocation({ lat: p.coords.latitude, lng: p.coords.longitude, name: '현재 위치' }); setLoading(false); },
-                    () => { setLoading(false); }
+                    (p) => { setLocation({ lat: p.coords.latitude, lng: p.coords.longitude, name: '현재 위치' }); setLoading(false); setError(null); },
+                    (e) => { setError("위치 권한을 확인해주세요."); setLoading(false); }
                 );
             };
 
-            const findCourses = async () => {
-                setLoading(true); setRoutes([]);
-                const seeds = [100, 200, 300];
-                try {
-                    const res = await Promise.all(seeds.map(s => 
-                        fetch(`https://graphhopper.com/api/1/route?point=${location.lat},${location.lng}&vehicle=foot&algorithm=round_trip&round_trip.distance=${distance * 1000}&round_trip.seed=${s}&elevation=true&points_encoded=false&key=${API_KEY}`).then(r => r.ok ? r.json() : null)
-                    ));
-                    const valid = res.filter(r => r?.paths?.[0]).map((r, i) => ({ ...r.paths[0], id: i }));
-                    if (valid.length > 0) {
-                        valid.sort((a, b) => (a.ascend/a.distance) - (b.ascend/b.distance));
-                        setRoutes(valid); setSelectedIdx(0); setView('result');
+            const toggleDirection = (dir) => {
+                if (dir === '무작위') {
+                    setDirections(['무작위']);
+                } else {
+                    let newDirs = directions.filter(d => d !== '무작위');
+                    if (newDirs.includes(dir)) {
+                        newDirs = newDirs.filter(d => d !== dir);
+                    } else {
+                        if (newDirs.length >= 2) newDirs.shift();
+                        newDirs.push(dir);
                     }
-                } catch {} finally { setLoading(false); }
+                    if (newDirs.length === 0) newDirs = ['무작위'];
+                    setDirections(newDirs);
+                }
+            };
+
+            const handleSearch = async () => {
+                if (!searchQuery) return;
+                setIsSearching(true);
+                try {
+                    const res = await fetch(`https://graphhopper.com/api/1/geocode?q=${encodeURIComponent(searchQuery)}&locale=ko&limit=5&key=${API_KEY}`);
+                    const data = await res.json();
+                    setSearchResults(data.hits || []);
+                } catch (e) {
+                    setError("검색 중 오류가 발생했습니다.");
+                } finally {
+                    setIsSearching(false);
+                }
+            };
+
+            const selectWaypoint = (hit) => {
+                setWaypoint({
+                    lat: hit.point.lat,
+                    lng: hit.point.lng,
+                    name: hit.name
+                });
+                setView('input');
+                setIsSheetOpen(true);
+                setOptionTab('waypoint');
+                setSearchQuery('');
+                setSearchResults([]);
+            };
+
+            const findCourses = async () => {
+                setLoading(true); setError(null); setRoutes([]);
+                
+                try {
+                    let promises = [];
+
+                    // Use Waypoint logic ONLY if tab is 'waypoint' AND waypoint exists
+                    if (optionTab === 'waypoint' && waypoint) {
+                         const url = `https://graphhopper.com/api/1/route?point=${location.lat},${location.lng}&point=${waypoint.lat},${waypoint.lng}&point=${location.lat},${location.lng}&vehicle=foot&elevation=true&points_encoded=false&instructions=true&locale=ko&key=${API_KEY}`;
+                         const res = await fetch(url).then(r => r.json());
+                         
+                         if (res.paths) {
+                            res.paths.forEach((p, i) => {
+                                promises.push(Promise.resolve({
+                                    id: 0,
+                                    distance: p.distance,
+                                    time: p.time,
+                                    ascend: p.ascend || 0,
+                                    points: p.points,
+                                    name: `${waypoint.name} 경유 코스`
+                                }));
+                            });
+                         }
+                    } else {
+                        // Direction/Loop Logic
+                        const seeds = [
+                            Math.floor(Math.random() * 10000), 
+                            Math.floor(Math.random() * 10000) + 10000, 
+                            Math.floor(Math.random() * 10000) + 20000
+                        ];
+
+                        const dirMap = { '북': 0, '동': 90, '남': 180, '서': 270 };
+                        
+                        promises = seeds.map((seed, index) => {
+                            let headingParam = "";
+                            if (optionTab === 'direction' && !directions.includes('무작위')) {
+                                const targetDir = directions[index % directions.length];
+                                const heading = dirMap[targetDir];
+                                if (heading !== undefined) headingParam = `&round_trip.heading=${heading}`;
+                            }
+
+                            return fetch(`https://graphhopper.com/api/1/route?point=${location.lat},${location.lng}&vehicle=foot&algorithm=round_trip&round_trip.distance=${distance * 1000}&round_trip.seed=${seed}${headingParam}&elevation=true&points_encoded=false&instructions=true&locale=ko&key=${API_KEY}`)
+                                .then(res => res.ok ? res.json() : null);
+                        });
+                    }
+
+                    const responses = Array.isArray(promises) ? await Promise.all(promises) : [await promises];
+                    const results = [];
+                    
+                    responses.forEach((res, i) => {
+                        if (res && res.paths && res.paths[0]) {
+                            const p = res.paths[0];
+                            if (res.id !== undefined) { 
+                                results.push(res); 
+                            } else {
+                                const courseName = generateCourseName(p.instructions);
+                                results.push({ 
+                                    id: i, 
+                                    distance: p.distance, 
+                                    time: p.time, 
+                                    ascend: p.ascend || 0, 
+                                    points: p.points,
+                                    name: courseName
+                                });
+                            }
+                        } else if (res && res.id !== undefined) {
+                             results.push(res);
+                        }
+                    });
+
+                    if (results.length === 0) throw new Error("경로를 찾을 수 없습니다.");
+                    results.sort((a, b) => (a.ascend/a.distance) - (b.ascend/b.distance));
+                    setRoutes(results); setSelectedIdx(0); setView('result'); setIsSheetOpen(false); // Collapse on result
+                } catch (e) { setError(e.message || "오류 발생"); } finally { setLoading(false); }
             };
 
             const downloadGPX = (route) => {
-                if(!route) return;
-                const name = `LSD_${(route.distance/1000).toFixed(1)}km`;
-                let gpx = `<?xml version="1.0"?><gpx version="1.1"><trk><name>${name}</name><trkseg>`;
-                route.points.coordinates.forEach(p => gpx += `<trkpt lat="${p[1]}" lon="${p[0]}"><ele>${p[2]||0}</ele></trkpt>`);
-                gpx += `</trkseg></trk></gpx>`;
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(new Blob([gpx], {type:'application/gpx+xml'})));
-                link.download = `${name}.gpx`;
-                link.click();
+                 if(!route) return;
+                 const name = `LSD_${(route.distance/1000).toFixed(1)}km`;
+                 const timeStr = new Date().toISOString();
+                 
+                 let gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx creator="LSD Loop Runner" version="1.1" xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
+  <metadata>
+    <name>${name}</name>
+    <time>${timeStr}</time>
+  </metadata>
+  <trk>
+    <name>${name}</name>
+    <trkseg>`;
+                 route.points.coordinates.forEach(p => gpx += `\n      <trkpt lat="${p[1]}" lon="${p[0]}"><ele>${p[2]||0}</ele></trkpt>`);
+                 gpx += `\n    </trkseg>\n  </trk>\n</gpx>`;
+                 
+                 const link = document.createElement('a');
+                 link.href = URL.createObjectURL(new Blob([gpx], {type:'application/gpx+xml'}));
+                 link.download = `${name}.gpx`;
+                 link.click();
             };
 
+            const getPaceString = (s) => `${Math.floor(s/60)}'${(s%60).toString().padStart(2,'0')}"`;
             const selectedRoute = routes[selectedIdx];
-            const diff = selectedRoute ? calculateDifficulty(selectedRoute.distance/1000, selectedRoute.ascend) : DIFFICULTY.FLAT;
 
             return (
                 <div className="flex flex-col h-full relative font-sans bg-black">
+                    
                     {/* Header */}
-                    <div className="absolute top-0 left-0 right-0 z-20 p-safe-pt pt-6 px-5 pointer-events-none">
-                        <div className="flex justify-between items-center pointer-events-auto">
-                            <h1 className="text-2xl font-black italic tracking-tighter text-white drop-shadow-md">
+                    <div className="absolute top-0 left-0 right-0 z-20 p-5 bg-gradient-to-b from-black/60 to-transparent pointer-events-none">
+                         <div className="flex justify-between items-center pointer-events-auto">
+                            <h1 className="text-2xl font-black italic tracking-tighter text-white flex items-center gap-2 drop-shadow-md">
                                 <span className="text-brand">LSD</span> RUNNER
                             </h1>
                             {view === 'result' && (
-                                <button onClick={() => setView('input')} className="bg-black/40 backdrop-blur p-2 rounded-full border border-white/10 text-white">
+                                <button onClick={() => { setView('input'); setIsSheetOpen(true); }} className="bg-black/50 backdrop-blur-md p-2 rounded-full text-white border border-white/10 hover:bg-brand hover:text-black transition-colors">
                                     <Icon name="settings" />
                                 </button>
                             )}
-                        </div>
+                         </div>
                     </div>
 
-                    {/* Map */}
+                    {/* Map Layer */}
                     <div className="flex-1 relative z-0">
-                        <MapView startLocation={location} route={view === 'result' ? selectedRoute : null} />
-                        <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-black via-transparent to-transparent z-10 opacity-60"></div>
+                        <MapView startLocation={location} route={view === 'result' ? selectedRoute : null} waypoint={waypoint} isSheetOpen={isSheetOpen && view === 'input'} />
+                        <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-black/40 via-transparent to-transparent z-10"></div>
                     </div>
+
+                    {/* Search Overlay */}
+                    {view === 'search' && (
+                        <div className="absolute inset-0 z-50 bg-gray-900 flex flex-col animate-slide-up">
+                            <div className="p-5 flex items-center gap-3 border-b border-white/10">
+                                <button onClick={() => setView('input')} className="text-gray-400 hover:text-white"><Icon name="close" /></button>
+                                <div className="flex-1 relative">
+                                    <input 
+                                        type="text" 
+                                        placeholder="장소 검색 (예: 반포한강공원)" 
+                                        className="w-full bg-black/50 text-white rounded-xl py-3 pl-10 pr-4 focus:outline-none focus:ring-1 focus:ring-brand"
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                                        autoFocus
+                                    />
+                                    <div className="absolute left-3 top-3.5 text-gray-400"><Icon name="search" /></div>
+                                </div>
+                                <button onClick={handleSearch} className="bg-brand text-black font-bold px-4 py-3 rounded-xl">검색</button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-5">
+                                {isSearching ? (
+                                    <div className="text-center text-gray-500 mt-10"><Icon name="loader" /> 검색 중...</div>
+                                ) : searchResults.length > 0 ? (
+                                    <ul className="space-y-2">
+                                        {searchResults.map((hit, i) => (
+                                            <li key={i} onClick={() => selectWaypoint(hit)} className="bg-white/5 p-4 rounded-xl cursor-pointer hover:bg-white/10 active:bg-white/20">
+                                                <div className="font-bold text-white">{hit.name}</div>
+                                                <div className="text-sm text-gray-400 mt-1">{hit.city || hit.country}, {hit.street || ''}</div>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                ) : (
+                                    <div className="text-center text-gray-600 mt-10">검색 결과가 여기에 표시됩니다.</div>
+                                )}
+                            </div>
+                        </div>
+                    )}
 
                     {/* Input Bottom Sheet */}
                     {view === 'input' && (
-                        <div className="absolute bottom-0 left-0 right-0 z-30 flex flex-col justify-end pointer-events-none">
-                            <div className="bg-gray-900/95 backdrop-blur-xl rounded-t-[2rem] p-6 pb-safe-bottom pt-8 shadow-2xl border-t border-white/10 pointer-events-auto animate-slide-up max-h-[85vh] overflow-y-auto">
-                                <div className="w-12 h-1 bg-white/20 rounded-full mx-auto mb-8 shrink-0"></div>
+                        <div 
+                            className={`absolute bottom-0 left-0 right-0 z-30 bg-gray-900 rounded-t-[2.5rem] border-t border-white/10 shadow-2xl shadow-black transition-all duration-300 flex flex-col h-auto max-h-[90dvh]`}
+                        >
+                            {/* Handle Bar */}
+                            <div 
+                                className="flex-none p-4 flex justify-center cursor-pointer"
+                                onClick={() => setIsSheetOpen(!isSheetOpen)}
+                            >
+                                <div className="w-12 h-1 bg-white/30 rounded-full"></div>
+                            </div>
+                            
+                            {/* Content Container */}
+                            <div className="px-8 pb-4">
                                 
-                                <div className="space-y-8">
-                                    {/* Location */}
-                                    <div>
-                                        <label className="text-xs font-bold text-gray-400 mb-2 uppercase tracking-wider flex items-center gap-2">
-                                            <Icon name="mapPin" className="text-brand" /> Start
-                                        </label>
-                                        <div className="flex gap-3">
-                                            <div className="flex-1 bg-black/50 border border-white/10 rounded-2xl px-4 py-4 flex items-center text-white min-w-0">
-                                                <div className="font-mono text-sm truncate">{location.name}</div>
-                                            </div>
-                                            <button onClick={handleGeoLocation} className="bg-brand text-black w-14 shrink-0 rounded-2xl flex items-center justify-center hover:bg-white transition-colors">
-                                                <Icon name="crosshair" />
+                                {/* Location (Always Visible) */}
+                                <div className="mb-6">
+                                    <label className="text-xs font-bold text-gray-200 mb-2 uppercase tracking-wider flex items-center gap-2 drop-shadow-md">
+                                        <Icon name="mapPin" className="text-brand" /> Start Point
+                                    </label>
+                                    <div className="flex gap-3">
+                                        <div className="flex-1 bg-black/50 border border-white/10 rounded-2xl px-4 py-4 flex items-center text-white backdrop-blur-sm">
+                                            <div className="font-mono text-sm truncate">{location.name}</div>
+                                        </div>
+                                        <button onClick={handleGeoLocation} className="bg-brand text-black w-14 rounded-2xl flex items-center justify-center hover:bg-white transition-colors shadow-lg shadow-brand/20">
+                                            <Icon name="crosshair" />
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Collapsible Section */}
+                                <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isSheetOpen ? 'max-h-[1000px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                                    {/* Options Tabs */}
+                                    <div className="mb-8">
+                                        <div className="flex bg-black/40 p-1 rounded-2xl mb-4">
+                                            <button 
+                                                onClick={() => setOptionTab('direction')}
+                                                className={`flex-1 py-3 rounded-xl text-xs font-bold transition-all ${optionTab === 'direction' ? 'bg-brand text-black shadow-md' : 'text-gray-400 hover:text-white'}`}
+                                            >
+                                                방향 선택
+                                            </button>
+                                            <button 
+                                                onClick={() => setOptionTab('waypoint')}
+                                                className={`flex-1 py-3 rounded-xl text-xs font-bold transition-all ${optionTab === 'waypoint' ? 'bg-brand text-black shadow-md' : 'text-gray-400 hover:text-white'}`}
+                                            >
+                                                경유지 추가
                                             </button>
                                         </div>
+
+                                        {optionTab === 'direction' && (
+                                            <div className="animate-fade-in">
+                                                <div className="flex gap-2">
+                                                    {['무작위', '동', '서', '남', '북'].map(dir => {
+                                                        const isActive = directions.includes(dir);
+                                                        return (
+                                                            <button 
+                                                                key={dir} 
+                                                                onClick={() => toggleDirection(dir)}
+                                                                className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all border ${isActive ? 'bg-white text-black border-white shadow-lg' : 'bg-black/40 text-gray-400 border-white/10 hover:border-white/30'}`}
+                                                            >
+                                                                {dir}
+                                                            </button>
+                                                        )
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {optionTab === 'waypoint' && (
+                                            <div className="animate-fade-in">
+                                                 {waypoint ? (
+                                                    <div className="bg-brand/10 border border-brand/30 rounded-2xl p-4 flex items-center justify-between">
+                                                        <div className="flex items-center gap-3 overflow-hidden">
+                                                            <div className="bg-brand text-black p-1.5 rounded-full"><Icon name="mapPin" className="w-4 h-4" /></div>
+                                                            <div className="truncate">
+                                                                <div className="text-[10px] text-brand font-bold uppercase">VIA</div>
+                                                                <div className="text-sm font-bold text-white truncate">{waypoint.name}</div>
+                                                            </div>
+                                                        </div>
+                                                        <button onClick={() => setWaypoint(null)} className="text-gray-400 hover:text-red-500 p-2"><Icon name="trash" /></button>
+                                                    </div>
+                                                ) : (
+                                                    <button onClick={() => setView('search')} className="w-full py-4 border border-dashed border-white/20 rounded-2xl text-gray-400 text-sm hover:border-brand hover:text-brand transition-colors flex items-center justify-center gap-2">
+                                                        <Icon name="plus" /> 경유지 검색하기
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
 
                                     {/* Distance */}
-                                    <div>
+                                    <div className="mb-8">
                                         <div className="flex justify-between items-end mb-4">
-                                            <label className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+                                            <label className="text-xs font-bold text-gray-200 uppercase tracking-wider flex items-center gap-2 drop-shadow-md">
                                                 <Icon name="route" className="text-brand" /> Distance
                                             </label>
-                                            <span className="text-4xl font-black italic text-white tracking-tighter">{distance}<span className="text-lg font-medium text-gray-500 not-italic ml-1">km</span></span>
+                                            <span className="text-4xl font-black italic text-white tracking-tighter drop-shadow-md">{distance}<span className="text-lg font-medium text-gray-300 not-italic ml-1">km</span></span>
                                         </div>
                                         <input type="range" min="5" max="30" step="1" value={distance} onChange={(e) => setDistance(parseInt(e.target.value))} />
-                                        <div className="flex justify-between text-[10px] font-mono text-gray-500 mt-3">
-                                            <span>5K</span><span>30K</span>
+                                        <div className="flex justify-between text-[10px] font-mono text-gray-300 mt-3 px-1 drop-shadow-md">
+                                            <span>SHORT (5K)</span>
+                                            <span>LONG (30K)</span>
                                         </div>
                                     </div>
 
                                     {/* Pace */}
-                                    <div>
+                                    <div className="mb-8">
                                         <div className="flex justify-between items-end mb-4">
-                                            <label className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+                                            <label className="text-xs font-bold text-gray-200 uppercase tracking-wider flex items-center gap-2 drop-shadow-md">
                                                 <Icon name="timer" className="text-brand" /> Pace
                                             </label>
-                                            <span className="text-2xl font-bold font-mono text-white">{getPaceString(pace)}</span>
+                                            <span className="text-2xl font-bold font-mono text-white drop-shadow-md">{getPaceString(pace)}</span>
                                         </div>
-                                        <div className="flex gap-2 overflow-x-auto pb-2 hide-scrollbar -mx-2 px-2">
+                                        <div className="flex gap-2 overflow-x-auto pb-2 hide-scrollbar">
                                             {[270, 300, 330, 360, 390, 420, 450].map((p) => (
                                                 <button key={p} onClick={() => setPace(p)} 
-                                                    className={`flex-shrink-0 px-4 py-3 rounded-xl font-mono text-sm font-bold border ${pace === p ? 'bg-white text-black border-white' : 'bg-transparent text-gray-500 border-white/10'}`}>
+                                                    className={`flex-shrink-0 px-5 py-3 rounded-xl font-mono text-sm font-bold transition-all border ${pace === p ? 'bg-white text-black border-white shadow-lg' : 'bg-black/40 text-gray-300 border-white/10 hover:border-white/30 backdrop-blur-sm'}`}>
                                                     {getPaceString(p)}
                                                 </button>
                                             ))}
                                         </div>
                                     </div>
 
-                                    <button onClick={findCourses} disabled={loading} className="w-full bg-brand text-black font-black text-lg h-14 rounded-2xl shadow-lg hover:bg-white active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:bg-gray-700 disabled:text-gray-500 uppercase mb-4">
-                                        {loading ? <Icon name="loader" /> : <>FIND ROUTE <Icon name="arrowRight" /></>}
-                                    </button>
+                                    {/* Footer CTA (Inside collapsible to hide when closed) */}
+                                    <div className="pt-2 pb-2">
+                                        <button onClick={findCourses} disabled={loading} className="w-full bg-brand text-black font-black text-lg h-16 rounded-2xl shadow-[0_0_20px_rgba(204,255,0,0.3)] hover:shadow-[0_0_30px_rgba(204,255,0,0.5)] active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:bg-gray-700 disabled:text-gray-500 disabled:shadow-none uppercase tracking-wide">
+                                            {loading ? <Icon name="loader" /> : <>FIND ROUTE <Icon name="arrowRight" /></>}
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -315,36 +629,63 @@
 
                     {/* Result Overlay */}
                     {view === 'result' && routes.length > 0 && (
-                        <div className="absolute bottom-0 left-0 right-0 z-30 pb-safe-bottom pt-4 px-4 bg-gradient-to-t from-black via-black/80 to-transparent">
-                            <div className="flex gap-4 overflow-x-auto pb-4 hide-scrollbar snap-x mb-4">
+                        <div className="absolute bottom-8 left-0 right-0 z-30 px-5 flex flex-col gap-5 animate-slide-up">
+                            <div className="flex gap-4 overflow-x-auto pb-4 hide-scrollbar snap-x px-1">
                                 {routes.map((route, idx) => {
                                     const d = calculateDifficulty(route.distance/1000, route.ascend);
                                     const isSel = selectedIdx === idx;
                                     return (
-                                        <div key={idx} onClick={() => setSelectedIdx(idx)} 
-                                            className={`flex-shrink-0 w-[85%] max-w-[340px] bg-gray-900/90 backdrop-blur rounded-3xl p-5 border transition-all cursor-pointer snap-center relative overflow-hidden ${isSel ? 'border-brand' : 'border-white/10 opacity-70'}`}>
-                                            <div className="flex justify-between items-start mb-4 relative z-10">
-                                                <span className={`text-[10px] font-black px-2 py-1 rounded uppercase tracking-widest border ${d.color}`}>{d.label}</span>
-                                                {isSel && <div className="bg-brand text-black text-[10px] font-black px-2 py-1 rounded">PICK</div>}
+                                        <div 
+                                            key={route.id} 
+                                            ref={el => cardRefs.current[idx] = el}
+                                            onClick={() => setSelectedIdx(idx)} 
+                                            className={`flex-shrink-0 w-[85%] max-w-[340px] backdrop-blur-xl rounded-3xl p-6 border transition-all cursor-pointer snap-center relative overflow-hidden ${isSel ? 'bg-gray-900/80 border-brand shadow-[0_0_30px_rgba(0,0,0,0.5)] scale-100' : 'bg-gray-900/60 border-white/5 opacity-60 scale-95'}`}>
+                                            
+                                            {isSel && <div className="absolute -top-10 -right-10 w-24 h-24 bg-brand blur-[60px] opacity-20"></div>}
+
+                                            <div className="flex justify-between items-start mb-2 relative z-10">
+                                                <span className={`text-[10px] font-black px-3 py-1.5 rounded uppercase tracking-widest border ${d.color}`}>{d.label}</span>
+                                                {isSel && <div className="bg-brand text-black text-[10px] font-black px-2 py-1 rounded">SELECTED</div>}
                                             </div>
-                                            <div className="flex justify-between items-end mb-4 relative z-10">
+
+                                            <div className="mb-4 relative z-10">
+                                                <div className="text-xs text-gray-300 font-medium truncate opacity-80">{route.name}</div>
+                                            </div>
+                                            
+                                            <div className="flex justify-between items-end mb-6 relative z-10">
                                                 <div>
-                                                    <div className="text-4xl font-black italic text-white tracking-tighter">{(route.distance / 1000).toFixed(1)}<span className="text-sm text-gray-500 font-bold ml-1">KM</span></div>
-                                                    <div className="text-sm text-gray-400 mt-1 font-mono">~ {Math.floor(((route.distance/1000)*pace)/60)} min</div>
+                                                    <div className="text-5xl font-black italic text-white tracking-tighter leading-none">
+                                                        {(route.distance / 1000).toFixed(1)}
+                                                        <span className="text-lg text-gray-500 font-bold not-italic ml-1">KM</span>
+                                                    </div>
+                                                    <div className="text-sm text-gray-400 mt-2 font-mono">
+                                                        ~ {Math.floor(((route.distance/1000)*pace)/60)} min
+                                                    </div>
                                                 </div>
                                                 <div className="text-right">
                                                     <div className="text-[10px] text-gray-500 font-bold uppercase mb-1">Elevation</div>
-                                                    <div className="text-lg font-bold text-white flex items-center justify-end gap-1 font-mono"><Icon name="trendingUp" className="text-brand" />{route.ascend.toFixed(0)}m</div>
+                                                    <div className="text-xl font-bold text-white flex items-center justify-end gap-1 font-mono">
+                                                        <Icon name="trendingUp" className="text-brand" />
+                                                        {route.ascend.toFixed(0)}m
+                                                    </div>
                                                 </div>
                                             </div>
-                                            <div className="relative z-10"><ElevationProfile points={route.points.coordinates} /></div>
+
+                                            <div className="pt-4 border-t border-white/10 relative z-10">
+                                                <ElevationProfile points={route.points.coordinates} />
+                                            </div>
                                         </div>
                                     );
                                 })}
                             </div>
-                            <div className="flex gap-3 pb-4">
-                                <button onClick={findCourses} className="flex-1 bg-white/10 backdrop-blur text-white font-bold h-12 rounded-xl border border-white/10 flex items-center justify-center gap-2 text-sm uppercase"><Icon name="refresh" /> Retry</button>
-                                <button onClick={() => downloadGPX(selectedRoute)} className="flex-[2] bg-brand text-black font-black h-12 rounded-xl shadow-lg flex items-center justify-center gap-2 text-sm uppercase"><Icon name="download" /> GPX Export</button>
+
+                            <div className="flex gap-3 pb-2">
+                                <button onClick={() => { setView('input'); setIsSheetOpen(true); }} className="flex-1 bg-black/60 backdrop-blur text-white font-bold h-14 rounded-2xl border border-white/20 flex items-center justify-center gap-2 hover:bg-white/10 transition-colors uppercase text-sm">
+                                    <Icon name="refresh" /> Retry
+                                </button>
+                                <button onClick={() => downloadGPX(selectedRoute)} className="flex-[2] bg-white text-black font-black h-14 rounded-2xl shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-transform uppercase tracking-wide text-sm">
+                                    <Icon name="download" /> Export GPX
+                                </button>
                             </div>
                         </div>
                     )}
@@ -357,5 +698,3 @@
     </script>
 </body>
 </html>
-
-
