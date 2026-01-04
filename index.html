@@ -137,7 +137,8 @@
             search: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>,
             compass: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon></svg>,
             trash: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>,
-            close: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            close: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>,
+            chevronDown: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
         };
 
         const Icon = ({ name, className }) => {
@@ -147,7 +148,7 @@
         };
 
         // --- Map Component ---
-        const MapView = ({ route, startLocation, waypoint }) => {
+        const MapView = ({ route, startLocation, waypoint, isSheetOpen }) => {
             const mapRef = useRef(null);
             const mapInstanceRef = useRef(null);
             const layerGroupRef = useRef(null);
@@ -184,7 +185,6 @@
                     
                     layerGroup.clearLayers();
 
-                    // Start Marker
                     const startIcon = L.divIcon({
                         className: 'custom-div-icon',
                         html: `<div style="background-color: #2563eb; width: 16px; height: 16px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 15px #2563eb;"></div>`,
@@ -193,7 +193,6 @@
                     });
                     L.marker([startLocation.lat, startLocation.lng], { icon: startIcon }).addTo(layerGroup);
 
-                    // Waypoint Marker
                     if (waypoint) {
                          const waypointIcon = L.divIcon({
                             className: 'custom-div-icon',
@@ -210,23 +209,23 @@
                             color: '#2563eb', weight: 6, opacity: 0.9, lineCap: 'round', lineJoin: 'round', className: 'drop-shadow-lg' 
                         }).addTo(layerGroup);
                         
-                        map.fitBounds(polyline.getBounds(), { paddingBottomRight: [0, 300], padding: [50, 50] });
+                        map.fitBounds(polyline.getBounds(), { paddingBottomRight: [0, isSheetOpen ? 300 : 50], padding: [50, 50] });
                     } else if (waypoint) {
-                         // Fit bounds to include start and waypoint if no route yet
                          const bounds = L.latLngBounds([
                              [startLocation.lat, startLocation.lng],
                              [waypoint.lat, waypoint.lng]
                          ]);
-                         map.fitBounds(bounds, { paddingBottomRight: [0, 300], padding: [50, 50] });
+                         map.fitBounds(bounds, { paddingBottomRight: [0, isSheetOpen ? 300 : 50], padding: [50, 50] });
                     } else {
                         const centerPoint = map.project([startLocation.lat, startLocation.lng], 14);
-                        const offset = window.innerHeight * 0.25; 
+                        // Adjust offset based on sheet state to keep pin visible
+                        const offset = isSheetOpen ? window.innerHeight * 0.25 : 0; 
                         const newCenterPoint = centerPoint.add([0, offset]);
                         const newCenter = map.unproject(newCenterPoint, 14);
                         map.setView(newCenter, 14, { animate: true });
                     }
                 }
-            }, [startLocation, route, waypoint]);
+            }, [startLocation, route, waypoint, isSheetOpen]);
 
             return <div ref={mapRef} className="w-full h-full bg-gray-100"></div>;
         };
@@ -259,12 +258,17 @@
             const [selectedIdx, setSelectedIdx] = useState(0);
             const [loading, setLoading] = useState(false);
             const [error, setError] = useState(null);
-            const [view, setView] = useState('input'); // input, result, search
-            const [directions, setDirections] = useState(['무작위']); // ['무작위'], ['동'], ['동','북'] etc.
-            const [waypoint, setWaypoint] = useState(null); // { lat, lng, name }
+            const [view, setView] = useState('input');
+            const [directions, setDirections] = useState(['무작위']);
+            const [waypoint, setWaypoint] = useState(null);
             const [searchQuery, setSearchQuery] = useState('');
             const [searchResults, setSearchResults] = useState([]);
             const [isSearching, setIsSearching] = useState(false);
+            
+            // UI States
+            const [isSheetOpen, setIsSheetOpen] = useState(true);
+            const [optionTab, setOptionTab] = useState(null); // 'direction' | 'waypoint' | null
+
             const cardRefs = useRef([]);
 
             useEffect(() => {
@@ -282,7 +286,6 @@
                 );
             };
 
-            // Direction Selection Logic
             const toggleDirection = (dir) => {
                 if (dir === '무작위') {
                     setDirections(['무작위']);
@@ -291,10 +294,7 @@
                     if (newDirs.includes(dir)) {
                         newDirs = newDirs.filter(d => d !== dir);
                     } else {
-                        // Limit to max 2 selections: Remove the oldest if count >= 2
-                        if (newDirs.length >= 2) {
-                            newDirs.shift();
-                        }
+                        if (newDirs.length >= 2) newDirs.shift();
                         newDirs.push(dir);
                     }
                     if (newDirs.length === 0) newDirs = ['무작위'];
@@ -302,7 +302,6 @@
                 }
             };
 
-            // Waypoint Search
             const handleSearch = async () => {
                 if (!searchQuery) return;
                 setIsSearching(true);
@@ -324,8 +323,18 @@
                     name: hit.name
                 });
                 setView('input');
+                setIsSheetOpen(true);
+                setOptionTab('waypoint');
                 setSearchQuery('');
                 setSearchResults([]);
+            };
+
+            const toggleTab = (tab) => {
+                if (optionTab === tab) {
+                    setOptionTab(null);
+                } else {
+                    setOptionTab(tab);
+                }
             };
 
             const findCourses = async () => {
@@ -334,21 +343,12 @@
                 try {
                     let promises = [];
 
-                    // Case 1: Has Waypoint -> Use Waypoint Routing (Start -> Waypoint -> Start)
-                    if (waypoint) {
-                         // We create 3 variations using alternative_route algorithm if possible, 
-                         // but standard free tier graphhopper mostly gives 1 best route or we use simple point routing.
-                         // To mimic variations, we might just call it once or try slight variations. 
-                         // For simplicity in this demo, we call simple routing.
-                         
+                    if (optionTab === 'waypoint' && waypoint) {
                          const url = `https://graphhopper.com/api/1/route?point=${location.lat},${location.lng}&point=${waypoint.lat},${waypoint.lng}&point=${location.lat},${location.lng}&vehicle=foot&elevation=true&points_encoded=false&instructions=true&locale=ko&key=${API_KEY}`;
                          const res = await fetch(url).then(r => r.json());
                          
                          if (res.paths) {
-                            // Since standard routing returns mostly one optimal path, we just show that one.
-                            // To fill UI, we can push it.
                             res.paths.forEach((p, i) => {
-                                const courseName = generateCourseName(p.instructions);
                                 promises.push(Promise.resolve({
                                     id: 0,
                                     distance: p.distance,
@@ -359,29 +359,21 @@
                                 }));
                             });
                          }
-                    } 
-                    // Case 2: No Waypoint -> Loop Logic with Directions
-                    else {
+                    } else {
                         const seeds = [
                             Math.floor(Math.random() * 10000), 
                             Math.floor(Math.random() * 10000) + 10000, 
                             Math.floor(Math.random() * 10000) + 20000
                         ];
 
-                        // Mapping directions to Headings (North=0, East=90, South=180, West=270)
-                        // If 'Random', we don't send heading (let seed handle it) or send random heading
                         const dirMap = { '북': 0, '동': 90, '남': 180, '서': 270 };
                         
                         promises = seeds.map((seed, index) => {
                             let headingParam = "";
-                            
-                            if (!directions.includes('무작위')) {
-                                // Cycle through selected directions for the 3 cards
+                            if (optionTab === 'direction' && !directions.includes('무작위')) {
                                 const targetDir = directions[index % directions.length];
                                 const heading = dirMap[targetDir];
-                                if (heading !== undefined) {
-                                    headingParam = `&round_trip.heading=${heading}`;
-                                }
+                                if (heading !== undefined) headingParam = `&round_trip.heading=${heading}`;
                             }
 
                             return fetch(`https://graphhopper.com/api/1/route?point=${location.lat},${location.lng}&vehicle=foot&algorithm=round_trip&round_trip.distance=${distance * 1000}&round_trip.seed=${seed}${headingParam}&elevation=true&points_encoded=false&instructions=true&locale=ko&key=${API_KEY}`)
@@ -389,14 +381,12 @@
                         });
                     }
 
-                    const responses = Array.isArray(promises) ? await Promise.all(promises) : [await promises]; // Handle mix
+                    const responses = Array.isArray(promises) ? await Promise.all(promises) : [await promises];
                     const results = [];
                     
-                    // Flatten results
                     responses.forEach((res, i) => {
                         if (res && res.paths && res.paths[0]) {
                             const p = res.paths[0];
-                            // If it was a promise object already resolved (waypoint case)
                             if (res.id !== undefined) { 
                                 results.push(res); 
                             } else {
@@ -417,16 +407,27 @@
 
                     if (results.length === 0) throw new Error("경로를 찾을 수 없습니다.");
                     results.sort((a, b) => (a.ascend/a.distance) - (b.ascend/b.distance));
-                    setRoutes(results); setSelectedIdx(0); setView('result');
+                    setRoutes(results); setSelectedIdx(0); setView('result'); setIsSheetOpen(false);
                 } catch (e) { setError(e.message || "오류 발생"); } finally { setLoading(false); }
             };
 
             const downloadGPX = (route) => {
                  if(!route) return;
                  const name = `LSD_${(route.distance/1000).toFixed(1)}km`;
-                 let gpx = `<?xml version="1.0"?><gpx version="1.1"><trk><name>${name}</name><trkseg>`;
-                 route.points.coordinates.forEach(p => gpx += `<trkpt lat="${p[1]}" lon="${p[0]}"><ele>${p[2]||0}</ele></trkpt>`);
-                 gpx += `</trkseg></trk></gpx>`;
+                 const timeStr = new Date().toISOString();
+                 
+                 let gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx creator="LSD Loop Runner" version="1.1" xmlns="http://www.topografix.com/GPX/1/1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
+  <metadata>
+    <name>${name}</name>
+    <time>${timeStr}</time>
+  </metadata>
+  <trk>
+    <name>${name}</name>
+    <trkseg>`;
+                 route.points.coordinates.forEach(p => gpx += `\n      <trkpt lat="${p[1]}" lon="${p[0]}"><ele>${p[2]||0}</ele></trkpt>`);
+                 gpx += `\n    </trkseg>\n  </trk>\n</gpx>`;
+                 
                  const link = document.createElement('a');
                  link.href = URL.createObjectURL(new Blob([gpx], {type:'application/gpx+xml'}));
                  link.download = `${name}.gpx`;
@@ -446,7 +447,7 @@
                                 <span className="text-brand">LSD</span> RUNNER
                             </h1>
                             {view === 'result' && (
-                                <button onClick={() => setView('input')} className="bg-black/50 backdrop-blur-md p-2 rounded-full text-white border border-white/10 hover:bg-brand hover:text-black transition-colors">
+                                <button onClick={() => { setView('input'); setIsSheetOpen(true); }} className="bg-black/50 backdrop-blur-md p-2 rounded-full text-white border border-white/10 hover:bg-brand hover:text-black transition-colors">
                                     <Icon name="settings" />
                                 </button>
                             )}
@@ -455,13 +456,13 @@
 
                     {/* Map Layer */}
                     <div className="flex-1 relative z-0">
-                        <MapView startLocation={location} route={view === 'result' ? selectedRoute : null} waypoint={waypoint} />
+                        <MapView startLocation={location} route={view === 'result' ? selectedRoute : null} waypoint={waypoint} isSheetOpen={isSheetOpen && view === 'input'} />
                         <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-black/40 via-transparent to-transparent z-10"></div>
                     </div>
 
                     {/* Search Overlay */}
                     {view === 'search' && (
-                        <div className="absolute inset-0 z-40 bg-gray-900 flex flex-col animate-slide-up">
+                        <div className="fixed inset-0 z-50 bg-gray-900 flex flex-col animate-slide-up pt-16">
                             <div className="p-5 flex items-center gap-3 border-b border-white/10">
                                 <button onClick={() => setView('input')} className="text-gray-400 hover:text-white"><Icon name="close" /></button>
                                 <div className="flex-1 relative">
@@ -478,7 +479,7 @@
                                 </div>
                                 <button onClick={handleSearch} className="bg-brand text-black font-bold px-4 py-3 rounded-xl">검색</button>
                             </div>
-                            <div className="flex-1 overflow-y-auto p-5">
+                            <div className="flex-1 overflow-y-auto p-5 pb-20">
                                 {isSearching ? (
                                     <div className="text-center text-gray-500 mt-10"><Icon name="loader" /> 검색 중...</div>
                                 ) : searchResults.length > 0 ? (
@@ -497,104 +498,135 @@
                         </div>
                     )}
 
-                    {/* Input Overlay */}
+                    {/* Input Bottom Sheet */}
                     {view === 'input' && (
-                        <div className="absolute bottom-0 left-0 right-0 z-30 bg-gray-900 rounded-t-[2.5rem] p-8 pb-10 animate-slide-up border-t border-white/10 shadow-2xl shadow-black max-h-[85vh] overflow-y-auto">
-                            <div className="w-12 h-1 bg-white/30 rounded-full mx-auto mb-6"></div>
-                            
-                            {/* Location & Waypoint */}
-                            <div className="mb-8">
-                                <label className="text-xs font-bold text-gray-200 mb-2 uppercase tracking-wider flex items-center gap-2 drop-shadow-md">
-                                    <Icon name="mapPin" className="text-brand" /> Start Point
-                                </label>
-                                <div className="flex gap-3 mb-3">
-                                    <div className="flex-1 bg-black/50 border border-white/10 rounded-2xl px-4 py-4 flex items-center text-white backdrop-blur-sm">
-                                        <div className="font-mono text-sm truncate">{location.name}</div>
-                                    </div>
-                                    <button onClick={handleGeoLocation} className="bg-brand text-black w-14 rounded-2xl flex items-center justify-center hover:bg-white transition-colors shadow-lg shadow-brand/20">
-                                        <Icon name="crosshair" />
-                                    </button>
-                                </div>
-                                
-                                {/* Waypoint Section */}
-                                {waypoint ? (
-                                    <div className="bg-brand/10 border border-brand/30 rounded-2xl p-4 flex items-center justify-between animate-fade-in">
-                                        <div className="flex items-center gap-3 overflow-hidden">
-                                            <div className="bg-brand text-black p-1.5 rounded-full"><Icon name="mapPin" className="w-4 h-4" /></div>
-                                            <div className="truncate">
-                                                <div className="text-[10px] text-brand font-bold uppercase">VIA</div>
-                                                <div className="text-sm font-bold text-white truncate">{waypoint.name}</div>
-                                            </div>
-                                        </div>
-                                        <button onClick={() => setWaypoint(null)} className="text-gray-400 hover:text-red-500 p-2"><Icon name="trash" /></button>
-                                    </div>
-                                ) : (
-                                    <button onClick={() => setView('search')} className="w-full py-3 border border-dashed border-white/20 rounded-2xl text-gray-400 text-sm hover:border-brand hover:text-brand transition-colors flex items-center justify-center gap-2">
-                                        <Icon name="plus" /> 경유지 추가 (선택)
-                                    </button>
-                                )}
+                        <div 
+                            className={`absolute bottom-0 left-0 right-0 z-30 bg-gray-900 rounded-t-[2.5rem] border-t border-white/10 shadow-2xl shadow-black transition-all duration-300 flex flex-col ${isSheetOpen ? 'max-h-[85vh] h-auto' : 'h-[180px]'}`}
+                        >
+                            {/* Handle Bar */}
+                            <div 
+                                className="flex-none p-4 flex justify-center cursor-pointer"
+                                onClick={() => setIsSheetOpen(!isSheetOpen)}
+                            >
+                                <div className="w-12 h-1 bg-white/30 rounded-full"></div>
                             </div>
-
-                            {/* Direction Selector (Only if no waypoint) */}
-                            {!waypoint && (
+                            
+                            {/* Scrollable Content */}
+                            <div className={`flex-1 overflow-y-auto px-8 pb-4 transition-opacity duration-300 ${isSheetOpen ? 'opacity-100' : 'opacity-100'}`}> {/* Opacity kept 100 to show top part */}
+                                
+                                {/* Location - Always Visible in collapsed mode due to height */}
                                 <div className="mb-8">
                                     <label className="text-xs font-bold text-gray-200 mb-2 uppercase tracking-wider flex items-center gap-2 drop-shadow-md">
-                                        <Icon name="compass" className="text-brand" /> Direction
+                                        <Icon name="mapPin" className="text-brand" /> Start Point
                                     </label>
-                                    <div className="flex gap-2">
-                                        {['무작위', '동', '서', '남', '북'].map(dir => {
-                                            const isActive = directions.includes(dir);
-                                            return (
-                                                <button 
-                                                    key={dir} 
-                                                    onClick={() => toggleDirection(dir)}
-                                                    className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all border ${isActive ? 'bg-white text-black border-white shadow-lg' : 'bg-black/40 text-gray-400 border-white/10 hover:border-white/30'}`}
-                                                >
-                                                    {dir}
-                                                </button>
-                                            )
-                                        })}
+                                    <div className="flex gap-3 mb-3">
+                                        <div className="flex-1 bg-black/50 border border-white/10 rounded-2xl px-4 py-4 flex items-center text-white backdrop-blur-sm">
+                                            <div className="font-mono text-sm truncate">{location.name}</div>
+                                        </div>
+                                        <button onClick={handleGeoLocation} className="bg-brand text-black w-14 rounded-2xl flex items-center justify-center hover:bg-white transition-colors shadow-lg shadow-brand/20">
+                                            <Icon name="crosshair" />
+                                        </button>
                                     </div>
                                 </div>
-                            )}
 
-                            {/* Distance */}
-                            <div className="mb-8">
-                                <div className="flex justify-between items-end mb-4">
-                                    <label className="text-xs font-bold text-gray-200 uppercase tracking-wider flex items-center gap-2 drop-shadow-md">
-                                        <Icon name="route" className="text-brand" /> Distance
-                                    </label>
-                                    <span className="text-4xl font-black italic text-white tracking-tighter drop-shadow-md">{distance}<span className="text-lg font-medium text-gray-300 not-italic ml-1">km</span></span>
-                                </div>
-                                <input type="range" min="5" max="30" step="1" value={distance} onChange={(e) => setDistance(parseInt(e.target.value))} />
-                                <div className="flex justify-between text-[10px] font-mono text-gray-300 mt-3 px-1 drop-shadow-md">
-                                    <span>SHORT (5K)</span>
-                                    <span>LONG (30K)</span>
-                                </div>
-                            </div>
-
-                            {/* Pace */}
-                            <div className="mb-10">
-                                <div className="flex justify-between items-end mb-4">
-                                    <label className="text-xs font-bold text-gray-200 uppercase tracking-wider flex items-center gap-2 drop-shadow-md">
-                                        <Icon name="timer" className="text-brand" /> Pace
-                                    </label>
-                                    <span className="text-2xl font-bold font-mono text-white drop-shadow-md">{getPaceString(pace)}</span>
-                                </div>
-                                <div className="flex gap-2 overflow-x-auto pb-2 hide-scrollbar">
-                                    {[270, 300, 330, 360, 390, 420, 450].map((p) => (
-                                        <button key={p} onClick={() => setPace(p)} 
-                                            className={`flex-shrink-0 px-5 py-3 rounded-xl font-mono text-sm font-bold transition-all border ${pace === p ? 'bg-white text-black border-white shadow-lg' : 'bg-black/40 text-gray-300 border-white/10 hover:border-white/30 backdrop-blur-sm'}`}>
-                                            {getPaceString(p)}
+                                {/* Options Tabs */}
+                                <div className="mb-8">
+                                    <div className="flex bg-black/40 p-1 rounded-2xl mb-4">
+                                        <button 
+                                            onClick={() => toggleTab('direction')}
+                                            className={`flex-1 py-3 rounded-xl text-xs font-bold transition-all ${optionTab === 'direction' ? 'bg-brand text-black shadow-md' : 'text-gray-400 hover:text-white'}`}
+                                        >
+                                            방향 선택
                                         </button>
-                                    ))}
+                                        <button 
+                                            onClick={() => toggleTab('waypoint')}
+                                            className={`flex-1 py-3 rounded-xl text-xs font-bold transition-all ${optionTab === 'waypoint' ? 'bg-white text-black shadow-md' : 'text-gray-400 hover:text-white'}`}
+                                        >
+                                            경유지 추가
+                                        </button>
+                                    </div>
+
+                                    {optionTab === 'direction' && (
+                                        <div className="animate-fade-in">
+                                            <div className="flex gap-2">
+                                                {['무작위', '동', '서', '남', '북'].map(dir => {
+                                                    const isActive = directions.includes(dir);
+                                                    return (
+                                                        <button 
+                                                            key={dir} 
+                                                            onClick={() => toggleDirection(dir)}
+                                                            className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all border ${isActive ? 'bg-white text-black border-white shadow-lg' : 'bg-black/40 text-gray-400 border-white/10 hover:border-white/30'}`}
+                                                        >
+                                                            {dir}
+                                                        </button>
+                                                    )
+                                                })}
+                                            </div>
+                                        </div>
+                                    )}
+                                    
+                                    {optionTab === 'waypoint' && (
+                                        <div className="animate-fade-in">
+                                             {waypoint ? (
+                                                <div className="bg-brand/10 border border-brand/30 rounded-2xl p-4 flex items-center justify-between">
+                                                    <div className="flex items-center gap-3 overflow-hidden">
+                                                        <div className="bg-brand text-black p-1.5 rounded-full"><Icon name="mapPin" className="w-4 h-4" /></div>
+                                                        <div className="truncate">
+                                                            <div className="text-[10px] text-brand font-bold uppercase">VIA</div>
+                                                            <div className="text-sm font-bold text-white truncate">{waypoint.name}</div>
+                                                        </div>
+                                                    </div>
+                                                    <button onClick={() => setWaypoint(null)} className="text-gray-400 hover:text-red-500 p-2"><Icon name="trash" /></button>
+                                                </div>
+                                            ) : (
+                                                <button onClick={() => setView('search')} className="w-full py-4 border border-dashed border-white/20 rounded-2xl text-gray-400 text-sm hover:border-brand hover:text-brand transition-colors flex items-center justify-center gap-2">
+                                                    <Icon name="plus" /> 경유지 검색하기
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Distance */}
+                                <div className="mb-8">
+                                    <div className="flex justify-between items-end mb-4">
+                                        <label className="text-xs font-bold text-gray-200 uppercase tracking-wider flex items-center gap-2 drop-shadow-md">
+                                            <Icon name="route" className="text-brand" /> Distance
+                                        </label>
+                                        <span className="text-4xl font-black italic text-white tracking-tighter drop-shadow-md">{distance}<span className="text-lg font-medium text-gray-300 not-italic ml-1">km</span></span>
+                                    </div>
+                                    <input type="range" min="5" max="30" step="1" value={distance} onChange={(e) => setDistance(parseInt(e.target.value))} />
+                                    <div className="flex justify-between text-[10px] font-mono text-gray-300 mt-3 px-1 drop-shadow-md">
+                                        <span>SHORT (5K)</span>
+                                        <span>LONG (30K)</span>
+                                    </div>
+                                </div>
+
+                                {/* Pace */}
+                                <div className="mb-4">
+                                    <div className="flex justify-between items-end mb-4">
+                                        <label className="text-xs font-bold text-gray-200 uppercase tracking-wider flex items-center gap-2 drop-shadow-md">
+                                            <Icon name="timer" className="text-brand" /> Pace
+                                        </label>
+                                        <span className="text-2xl font-bold font-mono text-white drop-shadow-md">{getPaceString(pace)}</span>
+                                    </div>
+                                    <div className="flex gap-2 overflow-x-auto pb-2 hide-scrollbar">
+                                        {[270, 300, 330, 360, 390, 420, 450].map((p) => (
+                                            <button key={p} onClick={() => setPace(p)} 
+                                                className={`flex-shrink-0 px-5 py-3 rounded-xl font-mono text-sm font-bold transition-all border ${pace === p ? 'bg-white text-black border-white shadow-lg' : 'bg-black/40 text-gray-300 border-white/10 hover:border-white/30 backdrop-blur-sm'}`}>
+                                                {getPaceString(p)}
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
                             </div>
 
-                            {/* Action Button */}
-                            <button onClick={findCourses} disabled={loading} className="w-full bg-brand text-black font-black text-lg h-16 rounded-2xl shadow-[0_0_20px_rgba(204,255,0,0.3)] hover:shadow-[0_0_30px_rgba(204,255,0,0.5)] active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:bg-gray-700 disabled:text-gray-500 disabled:shadow-none uppercase tracking-wide">
-                                {loading ? <Icon name="loader" /> : <>FIND ROUTE <Icon name="arrowRight" /></>}
-                            </button>
+                            {/* Fixed Footer CTA */}
+                            <div className={`flex-none p-6 pt-0 bg-gray-900 transition-opacity duration-300 ${isSheetOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+                                <button onClick={findCourses} disabled={loading} className="w-full bg-brand text-black font-black text-lg h-16 rounded-2xl shadow-[0_0_20px_rgba(204,255,0,0.3)] hover:shadow-[0_0_30px_rgba(204,255,0,0.5)] active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:bg-gray-700 disabled:text-gray-500 disabled:shadow-none uppercase tracking-wide">
+                                    {loading ? <Icon name="loader" /> : <>FIND ROUTE <Icon name="arrowRight" /></>}
+                                </button>
+                            </div>
                         </div>
                     )}
 
@@ -651,7 +683,7 @@
                             </div>
 
                             <div className="flex gap-3 pb-2">
-                                <button onClick={() => setView('input')} className="flex-1 bg-black/60 backdrop-blur text-white font-bold h-14 rounded-2xl border border-white/20 flex items-center justify-center gap-2 hover:bg-white/10 transition-colors uppercase text-sm">
+                                <button onClick={() => { setView('input'); setIsSheetOpen(true); }} className="flex-1 bg-black/60 backdrop-blur text-white font-bold h-14 rounded-2xl border border-white/20 flex items-center justify-center gap-2 hover:bg-white/10 transition-colors uppercase text-sm">
                                     <Icon name="refresh" /> Retry
                                 </button>
                                 <button onClick={() => downloadGPX(selectedRoute)} className="flex-[2] bg-white text-black font-black h-14 rounded-2xl shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-transform uppercase tracking-wide text-sm">
